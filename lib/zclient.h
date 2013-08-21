@@ -102,7 +102,7 @@ struct zserv_header
   uint16_t command;
 };
 
-/* Zebra IPv4 route message API. */
+/* Zebra IPv4 route message API. use zapi_route instead of this*/
 struct zapi_ipv4
 {
   u_char type;
@@ -118,6 +118,28 @@ struct zapi_ipv4
 
   u_char ifindex_num;
   unsigned int *ifindex;
+
+  u_char distance;
+
+  u_int32_t metric;
+};
+
+/*This will be the new zebra route message API
+ * try to use this when implementing new protocols
+ * this can support both ipv4 and ipv6 nexthop addresses*/
+struct zapi_route
+{
+  u_char type;
+
+  u_char flags;
+
+  u_char message;
+
+  safi_t safi;
+
+  u_char nexthop_num;
+
+  struct nexthop  **nexthop;
 
   u_char distance;
 
@@ -158,6 +180,7 @@ extern void zebra_interface_if_set_value (struct stream *, struct interface *);
 extern void zebra_router_id_update_read (struct stream *s, struct prefix *rid);
 extern int zapi_ipv4_route (u_char, struct zclient *, struct prefix_ipv4 *, 
                             struct zapi_ipv4 *);
+extern void zebra_init_route(struct zapi_route *zr,struct stream *s);
 
 #ifdef HAVE_IPV6
 /* IPv6 prefix add and delete function prototype. */

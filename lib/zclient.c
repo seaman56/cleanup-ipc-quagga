@@ -21,7 +21,7 @@
  */
 
 #include <zebra.h>
-
+#include "string.h"
 #include "prefix.h"
 #include "stream.h"
 #include "buffer.h"
@@ -136,6 +136,28 @@ zclient_stop (struct zclient *zclient)
       zclient->sock = -1;
     }
   zclient->fail = 0;
+}
+int zebra_init_route(struct zapi_route *zr, u_char type, u_char flags,
+safi_t safi, int distance, long long int metric)
+{
+   memset(zr, 0, sizeof(*zr));
+   zr->type = type;
+   zr->flags = flags;
+
+   zr->safi = safi;
+   if (distance >= 0)
+     {
+       zr->distance = distance;
+       SET_FLAG (zr->message, ZAPI_MESSAGE_NEXTHOP);
+     }
+
+   if (metric >= 0)
+     {
+	   zr->metric = metric;
+	   SET_FLAG (zr->message, ZAPI_MESSAGE_METRIC);
+     }
+
+   return 0;
 }
 
 void
