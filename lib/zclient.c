@@ -573,7 +573,96 @@ zapi_ipv6_route (u_char cmd, struct zclient *zclient, struct prefix_ipv6 *p,
   return zclient_send_message(zclient);
 }
 #endif /* HAVE_IPV6 */
+void
+zebra_init_route(struct zapi_route *zr, u_char type, u_char flags,
+safi_t safi, int distance, long long int metric)
+{
+   memset(&zr, 0, sizeof(*zr));
+   zr->type = type;
+   zr->flags = flags;
 
+   zr->safi = safi;
+   if (distance >= 0)
+     {
+       zr->distance = distance;
+       SET_FLAG (zr->message, ZAPI_MESSAGE_NEXTHOP);
+     }
+
+   if (metric >= 0)
+     {
+           zr->metric = metric;
+           SET_FLAG (zr->message, ZAPI_MESSAGE_METRIC);
+     }
+}
+
+void
+read_zebra_daemon(int command,struct zclient *z, struct prefix *p,struct stream *s, struct zapi_route *api)
+{
+  s = z->ibuf;
+
+  api.type = stream_getc (s);
+  api.flags = stream_getc (s);
+  api.message = stream_getc (s);
+
+  if(command== ZEBRA_IPV4_ROUTE_ADD || command== ZEBRA_IPV4_ROUTE_DELETE)
+    {
+      p=memset(&p,0,sizeof(struct zapi_route));
+      p->family=AF_INET;
+      p->prefixlen=stream_getc (s);
+      stream_get (&p.u.prefix4, s, PSIZE (p.prefixlen));
+      struct nexthop *nexthop;
+      api.nexthop=NULL;
+      if (CHECK_FLAG (api.message, ZAPI_MESSAGE_NEXTHOP))
+         {
+           api.nexthop_num = stream_getc (s);
+
+           for(int i=0;i<api.nexthop_num;i++)
+             {
+               nexthop = XCALLOC (MTYPE_NEXTHOP, sizeof (struct nexthop));
+               nexthop->type=NEXTHOP_TYPE_IPV4;
+               nexthop->gate.ipv4=stream_get_ipv4 (s);
+               add_nexthop_route(api->nexthop,nexthop);
+             }
+
+         }
+       if (CHECK_FLAG (api.message, ZAPI_MESSAGE_IFINDEX))
+         {
+           api.ifindex_num = stream_getc (s);
+           for(int i=0;i<api->nexthop_num;i++)
+             {
+               nexthop = XCALLOC (MTYPE_NEXTHOP, sizeof (struct nexthop));
+               nexthop->type=NEXTHOP_TYPE_IFINDEX;
+               nexthop->ifindex=stream_getl (s);
+               add_nexthop_route(api->nexthop,nexthop);
+             }
+         }
+       if (CHECK_FLAG (api.message, ZAPI_MESSAGE_DISTANCE))
+         api.distance = stream_getc (s);
+       if (CHECK_FLAG (api.message, ZAPI_MESSAGE_METRIC))
+         api.metric = stream_getl (s);
+
+    }
+}
+void
+add_nexthop_route(struct nexthop *list,struct nexthop *new)
+{
+  if(list)
+    {
+      struct nexthop *last;
+      for(last=list;last&&(last->next!=NULL);last=last.next)
+      ;
+      last.next=new;
+      new->prev=last;
+      new.next=NULL;
+    }
+  else
+    {
+    list=new;
+    list->prev=NULL;
+    list->next=NULL;
+    }
+
+}
 /* 
  * send a ZEBRA_REDISTRIBUTE_ADD or ZEBRA_REDISTRIBUTE_DELETE
  * for the route type (ZEBRA_ROUTE_KERNEL etc.). The zebra server will
