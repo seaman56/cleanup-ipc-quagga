@@ -182,8 +182,11 @@ extern void zebra_interface_if_set_value (struct stream *, struct interface *);
 extern void zebra_router_id_update_read (struct stream *s, struct prefix *rid);
 extern int zapi_ipv4_route (u_char, struct zclient *, struct prefix_ipv4 *, 
                             struct zapi_ipv4 *);
-extern void zebra_init_route(struct zapi_route *, u_char , u_char,safi_t , int , long long int );
-extern void read_zebra_daemon(int ,struct zclient *, struct prefix *,struct stream *, struct zapi_route *);
+extern void read_zebra_daemon(int ,struct zapi_route *,struct prefix *,
+                              struct stream *,struct zclient *);
+extern void zebra_init_route(struct zapi_route *, u_char , u_char,safi_t , int ,
+                            long long int );
+
 extern void add_nexthop_route(struct nexthop *,struct nexthop *);
 #ifdef HAVE_IPV6
 /* IPv6 prefix add and delete function prototype. */

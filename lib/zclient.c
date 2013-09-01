@@ -32,6 +32,7 @@
 #include "zclient.h"
 #include "memory.h"
 #include "table.h"
+#include "zebra/rib.h"
 
 /* Zebra client events. */
 enum event {ZCLIENT_SCHEDULE, ZCLIENT_READ, ZCLIENT_CONNECT};
@@ -575,7 +576,7 @@ zapi_ipv6_route (u_char cmd, struct zclient *zclient, struct prefix_ipv6 *p,
 #endif /* HAVE_IPV6 */
 void
 zebra_init_route(struct zapi_route *zr, u_char type, u_char flags,
-safi_t safi, int distance, long long int metric)
+                 safi_t safi, int distance, long long int metric)
 {
    memset(&zr, 0, sizeof(*zr));
    zr->type = type;
@@ -596,50 +597,51 @@ safi_t safi, int distance, long long int metric)
 }
 
 void
-read_zebra_daemon(int command,struct zclient *z, struct prefix *p,struct stream *s, struct zapi_route *api)
+read_zebra_daemon(int command, struct zapi_route *rt, struct prefix *p,
+                  struct stream *s, struct zclient *z)
 {
   s = z->ibuf;
 
-  api.type = stream_getc (s);
-  api.flags = stream_getc (s);
-  api.message = stream_getc (s);
+  rt->type = stream_getc (s);
+  rt->flags = stream_getc (s);
+  rt->message = stream_getc (s);
 
   if(command== ZEBRA_IPV4_ROUTE_ADD || command== ZEBRA_IPV4_ROUTE_DELETE)
     {
       p=memset(&p,0,sizeof(struct zapi_route));
       p->family=AF_INET;
       p->prefixlen=stream_getc (s);
-      stream_get (&p.u.prefix4, s, PSIZE (p.prefixlen));
+      stream_get (&p->u.prefix4, s, PSIZE (p->prefixlen));
       struct nexthop *nexthop;
-      api.nexthop=NULL;
-      if (CHECK_FLAG (api.message, ZAPI_MESSAGE_NEXTHOP))
+      rt->nexthop=NULL;
+      if (CHECK_FLAG (rt->message, ZAPI_MESSAGE_NEXTHOP))
          {
-           api.nexthop_num = stream_getc (s);
+           rt->nexthop_num = stream_getc (s);
 
-           for(int i=0;i<api.nexthop_num;i++)
+           for(int i=0;i<rt->nexthop_num;i++)
              {
                nexthop = XCALLOC (MTYPE_NEXTHOP, sizeof (struct nexthop));
                nexthop->type=NEXTHOP_TYPE_IPV4;
-               nexthop->gate.ipv4=stream_get_ipv4 (s);
-               add_nexthop_route(api->nexthop,nexthop);
+               nexthop->gate.ipv4.s_addr=stream_get_ipv4 (s);
+               add_nexthop_route(rt->nexthop,nexthop);
              }
 
          }
-       if (CHECK_FLAG (api.message, ZAPI_MESSAGE_IFINDEX))
+       if (CHECK_FLAG (rt->message, ZAPI_MESSAGE_IFINDEX))
          {
-           api.ifindex_num = stream_getc (s);
-           for(int i=0;i<api->nexthop_num;i++)
+           rt->ifindex_num = stream_getc (s);
+           for(int i=0;i<rt->nexthop_num;i++)
              {
                nexthop = XCALLOC (MTYPE_NEXTHOP, sizeof (struct nexthop));
                nexthop->type=NEXTHOP_TYPE_IFINDEX;
                nexthop->ifindex=stream_getl (s);
-               add_nexthop_route(api->nexthop,nexthop);
+               add_nexthop_route(rt->nexthop,nexthop);
              }
          }
-       if (CHECK_FLAG (api.message, ZAPI_MESSAGE_DISTANCE))
-         api.distance = stream_getc (s);
-       if (CHECK_FLAG (api.message, ZAPI_MESSAGE_METRIC))
-         api.metric = stream_getl (s);
+       if (CHECK_FLAG (rt->message, ZAPI_MESSAGE_DISTANCE))
+         rt->distance = stream_getc (s);
+       if (CHECK_FLAG (rt->message, ZAPI_MESSAGE_METRIC))
+         rt->metric = stream_getl (s);
 
     }
 }
@@ -649,11 +651,11 @@ add_nexthop_route(struct nexthop *list,struct nexthop *new)
   if(list)
     {
       struct nexthop *last;
-      for(last=list;last&&(last->next!=NULL);last=last.next)
+      for(last=list;last&&(last->next!=NULL);last=last->next)
       ;
-      last.next=new;
+      last->next=new;
       new->prev=last;
-      new.next=NULL;
+      new->next=NULL;
     }
   else
     {
