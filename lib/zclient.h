@@ -190,6 +190,7 @@ extern int zebra_init_route(struct zapi_route *, u_char , u_char,safi_t , int ,
 extern void add_nexthop_route(struct nexthop *,struct nexthop *);
 extern int zapi_route_2_zebra (u_char , struct zclient *, struct prefix *,
                  struct zapi_route *);
+
 #ifdef HAVE_IPV6
 /* IPv6 prefix add and delete function prototype. */
 

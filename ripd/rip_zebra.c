@@ -39,6 +39,7 @@ void
 rip_zebra_ipv4_add (struct prefix_ipv4 *p, struct in_addr *nexthop, 
 		    u_int32_t metric, u_char distance)
 {
+
   struct zapi_route api;
   struct nexthop nexthop_rt;
   struct prefix pr;

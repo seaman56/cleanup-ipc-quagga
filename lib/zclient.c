@@ -644,6 +644,7 @@ read_zebra_daemon(int command, struct zapi_route *rt, struct prefix *p,
          rt->metric = stream_getl (s);
 
     }
+
 }
 void
 add_nexthop_route(struct nexthop *list,struct nexthop *new)
