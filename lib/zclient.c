@@ -574,11 +574,11 @@ zapi_ipv6_route (u_char cmd, struct zclient *zclient, struct prefix_ipv6 *p,
   return zclient_send_message(zclient);
 }
 #endif /* HAVE_IPV6 */
-void
+int
 zebra_init_route(struct zapi_route *zr, u_char type, u_char flags,
-                 safi_t safi, int distance, long long int metric)
+                 safi_t safi, int distance, u_int32_t metric,u_char message)
 {
-   memset(&zr, 0, sizeof(*zr));
+   memset(zr, 0, sizeof(struct zapi_route));
    zr->type = type;
    zr->flags = flags;
 
@@ -591,8 +591,8 @@ zebra_init_route(struct zapi_route *zr, u_char type, u_char flags,
 
    if (metric >= 0)
      {
-           zr->metric = metric;
-           SET_FLAG (zr->message, ZAPI_MESSAGE_METRIC);
+       zr->metric = metric;
+       SET_FLAG (zr->message, ZAPI_MESSAGE_METRIC);
      }
 }
 
@@ -608,7 +608,7 @@ read_zebra_daemon(int command, struct zapi_route *rt, struct prefix *p,
 
   if(command== ZEBRA_IPV4_ROUTE_ADD || command== ZEBRA_IPV4_ROUTE_DELETE)
     {
-      p=memset(&p,0,sizeof(struct zapi_route));
+      p=memset(&p,0,sizeof(struct prefix));
       p->family=AF_INET;
       p->prefixlen=stream_getc (s);
       stream_get (&p->u.prefix4, s, PSIZE (p->prefixlen));
@@ -664,6 +664,69 @@ add_nexthop_route(struct nexthop *list,struct nexthop *new)
     list->next=NULL;
     }
 
+}
+int
+zapi_route_2_zebra (u_char cmd, struct zclient *zclient, struct prefix *p,
+                 struct zapi_route *api)
+{
+  int i;
+  int psize;
+  struct stream *s;
+  struct nexthop *current;
+  /* Reset stream. */
+  s = zclient->obuf;
+  stream_reset (s);
+
+  zclient_create_header (s, cmd);
+
+  /* adding type and nexthop. */
+  stream_putc (s, api->type);
+  stream_putc (s, api->flags);
+  stream_putc (s, api->message);
+  stream_putw (s, api->safi);
+
+  /* adding prefix information. */
+  psize = PSIZE (p->prefixlen);
+  stream_putc (s, p->prefixlen);
+  stream_write (s, (u_char *) & (p->u.prefix4), psize);
+
+  if (CHECK_FLAG (api->message, ZAPI_MESSAGE_NEXTHOP))
+      {
+        if (CHECK_FLAG (api->flags, ZEBRA_FLAG_BLACKHOLE))
+          {
+            stream_putc (s, 1);
+            stream_putc (s, ZEBRA_NEXTHOP_BLACKHOLE);
+
+          }
+        else
+          stream_putc (s, api->nexthop_num + api->ifindex_num);
+
+          current=api->nexthop;
+        for (i = 0; i < api->nexthop_num; i++)
+          {
+            //add if to select only v4 nexthops
+            stream_putc (s, ZEBRA_NEXTHOP_IPV4);
+            //stream_put_in_addr (s, &(current->gate.ipv4));
+            stream_put_ipv4(s,current->gate.ipv4.s_addr);
+            current=current->next;
+          }
+        for (i = 0; i < api->ifindex_num; i++)
+          {
+
+            stream_putc (s, ZEBRA_NEXTHOP_IFINDEX);
+            stream_putl (s, current->ifindex);
+            current=current->next;
+          }
+
+      }
+  if (CHECK_FLAG (api->message, ZAPI_MESSAGE_DISTANCE))
+    stream_putc (s, api->distance);
+  if (CHECK_FLAG (api->message, ZAPI_MESSAGE_METRIC))
+    stream_putl (s, api->metric);
+
+    /* Put length at the first point of the stream. */
+  stream_putw_at (s, 0, stream_get_endp (s));
+  return zclient_send_message(zclient);
 }
 /* 
  * send a ZEBRA_REDISTRIBUTE_ADD or ZEBRA_REDISTRIBUTE_DELETE

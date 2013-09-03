@@ -39,31 +39,33 @@ void
 rip_zebra_ipv4_add (struct prefix_ipv4 *p, struct in_addr *nexthop, 
 		    u_int32_t metric, u_char distance)
 {
-  struct zapi_ipv4 api;
-
+  struct zapi_route api;
+  struct nexthop nexthop_rt;
+  struct prefix pr;
+  nexthop_rt.next=NULL;
+  nexthop_rt.prev=NULL;
+  nexthop_rt.rtype=NEXTHOP_TYPE_IPV4;
+  pr.family=p->family;
+  pr.prefixlen=p->prefixlen;
+  pr.u.prefix4.s_addr=p->prefix.s_addr;
   if (zclient->redist[ZEBRA_ROUTE_RIP])
     {
-      api.type = ZEBRA_ROUTE_RIP;
-      api.flags = 0;
-      api.message = 0;
-      api.safi = SAFI_UNICAST;
+      zebra_init_route(&api,ZEBRA_ROUTE_RIP,0,SAFI_UNICAST,120,metric,0);
+      if (distance && distance != ZEBRA_RIP_DISTANCE_DEFAULT)
+        {
+          api.distance = distance;
+        }
       SET_FLAG (api.message, ZAPI_MESSAGE_NEXTHOP);
       api.nexthop_num = 1;
-      api.nexthop = &nexthop;
+      nexthop_rt.gate.ipv4.s_addr = nexthop->s_addr;
+      api.nexthop=&nexthop_rt;
+
       api.ifindex_num = 0;
-      SET_FLAG (api.message, ZAPI_MESSAGE_METRIC);
       api.metric = metric;
-
-      if (distance && distance != ZEBRA_RIP_DISTANCE_DEFAULT)
-	{
-	  SET_FLAG (api.message, ZAPI_MESSAGE_DISTANCE);
-	  api.distance = distance;
-	}
-
-      zapi_ipv4_route (ZEBRA_IPV4_ROUTE_ADD, zclient, p, &api);
-
-      rip_global_route_changes++;
     }
+  zapi_route_2_zebra(ZEBRA_IPV4_ROUTE_ADD,zclient,&pr,&api);
+  rip_global_route_changes++;
+
 }
 
 void
