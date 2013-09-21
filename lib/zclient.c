@@ -646,7 +646,6 @@ zebra_route_recieve(int command, struct zapi_route *rt, struct prefix *p,
                  }
 
 
-
                //nexthop->gate.ipv4.s_addr=stream_get_ipv4 (s);
 
                add_nexthop_route(rt,nexthop);

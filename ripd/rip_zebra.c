@@ -162,7 +162,6 @@ rip_zebra_read_ipv4 (int command, struct zclient *zclient, zebra_size_t length)
 
   for(current = api.nexthop;current!=NULL;current=current->next)
     {
-
       if(current->type==NEXTHOP_TYPE_IPV4)
         {
           nexthop.s_addr=current->gate.ipv4.s_addr;

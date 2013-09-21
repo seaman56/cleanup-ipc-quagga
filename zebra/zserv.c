@@ -446,7 +446,6 @@ zsend_route_multipath (int cmd, struct zserv *client, struct prefix *p,
               }
 
           nexthop_num++;
-
         }
     }
 
