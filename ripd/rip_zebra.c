@@ -175,7 +175,6 @@ rip_zebra_read_ipv4 (int command, struct zclient *zclient, zebra_size_t length)
           nexthop.s_addr=current->gate.ipv4.s_addr;
           ifindex=current->ifindex;
         }
-
     }
 
   /* Then fetch IPv4 prefixes. */

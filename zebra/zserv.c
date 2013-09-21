@@ -444,7 +444,6 @@ zsend_route_multipath (int cmd, struct zserv *client, struct prefix *p,
                     stream_putl (s, nexthop->ifindex);
                   }
               }
-
           nexthop_num++;
         }
     }
