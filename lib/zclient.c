@@ -589,8 +589,9 @@ zebra_init_route(struct zapi_route *zr, u_char type, u_char flags,
        zr->distance = distance;
      }
 
-    zr->metric = metric;
-    SET_FLAG (zr->message, ZAPI_MESSAGE_METRIC);
+     SET_FLAG (zr->message, ZAPI_MESSAGE_METRIC);
+     zr->metric = metric;
+
 return 0;
 }
 
@@ -598,8 +599,10 @@ void
 zebra_route_recieve(int command, struct zapi_route *rt, struct prefix *p,
                   struct stream *s, struct zclient *z)
 {
-
+  u_char nexthop_type;
   memset(p, 0, sizeof(struct prefix));
+  memset(rt,0,sizeof(struct zapi_route));
+
   s = z->ibuf;
 
   rt->type = stream_getc (s);
@@ -619,12 +622,37 @@ zebra_route_recieve(int command, struct zapi_route *rt, struct prefix *p,
            for(int i=0;i<rt->nexthop_num;i++)
              {
                nexthop = XCALLOC (MTYPE_NEXTHOP, sizeof (struct nexthop));
-               nexthop->type=NEXTHOP_TYPE_IPV4;
-               nexthop->gate.ipv4.s_addr=stream_get_ipv4 (s);
+               memset(nexthop,0,sizeof(struct nexthop));
+               nexthop_type=stream_getc (s);
+               switch (nexthop_type)
+                 {
+                   case ZEBRA_NEXTHOP_IFINDEX:
+                     nexthop->type=NEXTHOP_TYPE_IFINDEX;
+                     nexthop->ifindex=stream_getl (s);
+                     break;
+                   case ZEBRA_NEXTHOP_IFNAME:
+                     break;
+                   case ZEBRA_NEXTHOP_IPV4:
+                     nexthop->type=NEXTHOP_TYPE_IPV4;
+                     nexthop->gate.ipv4.s_addr=stream_get_ipv4 (s);
+                     break;
+                   case ZEBRA_NEXTHOP_IPV4_IFINDEX:
+                     nexthop->type=NEXTHOP_TYPE_IPV4_IFINDEX;
+                     nexthop->gate.ipv4.s_addr=stream_get_ipv4 (s);
+                     nexthop->ifindex=stream_getl (s);
+                     break;
+                   case ZEBRA_NEXTHOP_IPV4_IFNAME:
+                     break;
+                 }
+
+
+
+               //nexthop->gate.ipv4.s_addr=stream_get_ipv4 (s);
+
                add_nexthop_route(rt,nexthop);
              }
            }
-       if (CHECK_FLAG (rt->message, ZAPI_MESSAGE_IFINDEX))
+       /*if (CHECK_FLAG (rt->message, ZAPI_MESSAGE_IFINDEX))
          {
            rt->ifindex_num = stream_getc (s);
            for(int i=0;i<rt->ifindex_num;i++)
@@ -634,7 +662,7 @@ zebra_route_recieve(int command, struct zapi_route *rt, struct prefix *p,
                nexthop->ifindex=stream_getl (s);
                add_nexthop_route(rt,nexthop);
              }
-         }
+         }*/
 
 
     }
@@ -707,41 +735,43 @@ zebra_route_send(u_char cmd, struct zclient *zclient, struct prefix *p,
 
             }
           else
-            stream_putc (s, api->nexthop_num);
-          current=api->nexthop;
-          for (i = 0; i < api->nexthop_num; i++)
             {
-              switch (current->type)
-              {
-                case NEXTHOP_TYPE_IPV4:
-                  //add if to select only v4 nexthops
-                  stream_putc (s, ZEBRA_NEXTHOP_IPV4);
-                  //stream_put_in_addr (s, &(current->gate.ipv4));
-                  stream_put_ipv4(s,current->gate.ipv4.s_addr);
-                  break;
-                case NEXTHOP_TYPE_IFINDEX:
-                  stream_putc (s, ZEBRA_NEXTHOP_IFINDEX);
-                  stream_putl (s, current->ifindex);
-                  break;
-                case NEXTHOP_TYPE_IFNAME:
-                 //stream_putc (s, ZEBRA_NEXTHOP_IFNAME)
-                  //stream_putc (s, current->ifname);//how to give ifname first length and then name
-                  break;
-                case NEXTHOP_TYPE_IPV4_IFINDEX:
-                  stream_putc (s, ZEBRA_NEXTHOP_IPV4_IFINDEX);
-                  stream_put_ipv4(s,current->gate.ipv4.s_addr);
-                  stream_putl (s, current->ifindex);
-                  break;
-                case NEXTHOP_TYPE_IPV4_IFNAME:
-                  stream_putc (s, ZEBRA_NEXTHOP_IPV4_IFNAME);
-                  stream_put_ipv4(s,current->gate.ipv4.s_addr);
-                  //stream_putc (s, current->ifname);//how to give ifname first length and then name
-                  break;
-                default:
-                break;
-              }
+              stream_putc (s, api->nexthop_num);
+              current=api->nexthop;
+              for (i = 0; i < api->nexthop_num; i++)
+                {
+                  switch (current->type)
+                  {
+                    case NEXTHOP_TYPE_IPV4:
+                      //add if to select only v4 nexthops
+                      stream_putc (s, ZEBRA_NEXTHOP_IPV4);
+                      //stream_put_in_addr (s, &(current->gate.ipv4));
+                      stream_put_ipv4(s,current->gate.ipv4.s_addr);
+                    break;
+                    case NEXTHOP_TYPE_IFINDEX:
+                      stream_putc (s, ZEBRA_NEXTHOP_IFINDEX);
+                      stream_putl (s, current->ifindex);
+                      break;
+                    case NEXTHOP_TYPE_IFNAME:
+                      //stream_putc (s, ZEBRA_NEXTHOP_IFNAME)
+                      //stream_putc (s, current->ifname);//how to give ifname first length and then name
+                      break;
+                    case NEXTHOP_TYPE_IPV4_IFINDEX:
+                      stream_putc (s, ZEBRA_NEXTHOP_IPV4_IFINDEX);
+                      stream_put_ipv4(s,current->gate.ipv4.s_addr);
+                      stream_putl (s, current->ifindex);
+                      break;
+                    case NEXTHOP_TYPE_IPV4_IFNAME:
+                      stream_putc (s, ZEBRA_NEXTHOP_IPV4_IFNAME);
+                      stream_put_ipv4(s,current->gate.ipv4.s_addr);
+                      //stream_putc (s, current->ifname);//how to give ifname first length and then name
+                      break;
+                    default:
+                      break;
+                  }
 
-              current=current->next;
+                  current=current->next;
+                }
             }
         }
     }

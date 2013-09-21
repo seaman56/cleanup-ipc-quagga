@@ -45,7 +45,7 @@ rip_zebra_ipv4_add (struct prefix_ipv4 *p, struct in_addr *nexthop,
   struct prefix pr;
   nexthop_rt.next=NULL;
   nexthop_rt.prev=NULL;
-  nexthop_rt.rtype=NEXTHOP_TYPE_IPV4;
+  nexthop_rt.type=NEXTHOP_TYPE_IPV4;
   pr.family=p->family;
   pr.prefixlen=p->prefixlen;
   pr.u.prefix4.s_addr=p->prefix.s_addr;
@@ -70,13 +70,14 @@ void
 rip_zebra_ipv4_delete (struct prefix_ipv4 *p, struct in_addr *nexthop, 
 		       u_int32_t metric)
 {
+
   //struct zapi_ipv4 api;
   struct zapi_route api;
   struct nexthop nexthop_rt;
   struct prefix pr;
   nexthop_rt.next=NULL;
   nexthop_rt.prev=NULL;
-  nexthop_rt.rtype=NEXTHOP_TYPE_IPV4;
+  nexthop_rt.type=NEXTHOP_TYPE_IPV4;
   pr.family=p->family;
   pr.prefixlen=p->prefixlen;
   pr.u.prefix4.s_addr=p->prefix.s_addr;
@@ -95,13 +96,13 @@ rip_zebra_ipv4_delete (struct prefix_ipv4 *p, struct in_addr *nexthop,
 
       zapi_ipv4_route (ZEBRA_IPV4_ROUTE_DELETE, zclient, p, &api);*/
 
-      zebra_init_route(&api,ZEBRA_ROUTE_RIP,0,SAFI_UNICAST,120,metric,0);
+      zebra_init_route(&api,ZEBRA_ROUTE_RIP,0,SAFI_UNICAST,-1,metric,0);
       SET_FLAG (api.message, ZAPI_MESSAGE_METRIC);
       SET_FLAG (api.message, ZAPI_MESSAGE_NEXTHOP);
       api.nexthop_num = 1;
       nexthop_rt.gate.ipv4.s_addr = nexthop->s_addr;
       api.nexthop=&nexthop_rt;
-      zebra_route_send(ZEBRA_IPV4_ROUTE_ADD,zclient,&pr,&api);
+      zebra_route_send(ZEBRA_IPV4_ROUTE_DELETE,zclient,&pr,&api);
       rip_global_route_changes++;
     }
 }
@@ -110,6 +111,7 @@ rip_zebra_ipv4_delete (struct prefix_ipv4 *p, struct in_addr *nexthop,
 static int
 rip_zebra_read_ipv4 (int command, struct zclient *zclient, zebra_size_t length)
 {
+
   struct stream *s;
   struct zapi_route api;
   struct prefix p;
@@ -117,6 +119,7 @@ rip_zebra_read_ipv4 (int command, struct zclient *zclient, zebra_size_t length)
   unsigned int ifindex;
   struct in_addr nexthop;
   zebra_route_recieve(command,&api,&p,s,zclient);
+  ifindex=0;
   /*struct zapi_ipv4 api;
   unsigned long ifindex;
   struct in_addr nexthop;
@@ -159,14 +162,21 @@ rip_zebra_read_ipv4 (int command, struct zclient *zclient, zebra_size_t length)
 
   for(current = api.nexthop;current!=NULL;current=current->next)
     {
+
       if(current->type==NEXTHOP_TYPE_IPV4)
         {
           nexthop.s_addr=current->gate.ipv4.s_addr;
         }
-      else if(current->type==NEXTHOP_TYPE_IPV4)
+      else if(current->type==NEXTHOP_TYPE_IFINDEX)
         {
           ifindex=current->ifindex;
         }
+      else if(current->type==NEXTHOP_TYPE_IPV4_IFINDEX)
+        {
+          nexthop.s_addr=current->gate.ipv4.s_addr;
+          ifindex=current->ifindex;
+        }
+
     }
 
   /* Then fetch IPv4 prefixes. */
@@ -719,7 +729,6 @@ rip_zclient_init ()
   install_default (ZEBRA_NODE);
   install_element (ZEBRA_NODE, &rip_redistribute_rip_cmd);
   install_element (ZEBRA_NODE, &no_rip_redistribute_rip_cmd);
-
 
   /* Install command elements to rip node. */
   install_element (RIP_NODE, &rip_redistribute_type_cmd);
