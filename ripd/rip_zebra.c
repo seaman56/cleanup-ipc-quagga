@@ -39,7 +39,6 @@ void
 rip_zebra_ipv4_add (struct prefix_ipv4 *p, struct in_addr *nexthop, 
 		    u_int32_t metric, u_char distance)
 {
-
   struct zapi_route api;
   struct nexthop nexthop_rt;
   struct prefix pr;
@@ -52,13 +51,10 @@ rip_zebra_ipv4_add (struct prefix_ipv4 *p, struct in_addr *nexthop,
   if (zclient->redist[ZEBRA_ROUTE_RIP])
     {
       zebra_init_route(&api,ZEBRA_ROUTE_RIP,0,SAFI_UNICAST,distance,metric,0);
-      /*if (distance && distance != ZEBRA_RIP_DISTANCE_DEFAULT)
-        {
-          api.distance = distance;
-        }*/
       SET_FLAG (api.message, ZAPI_MESSAGE_NEXTHOP);
       api.nexthop_num = 1;
       nexthop_rt.gate.ipv4.s_addr = nexthop->s_addr;
+      nexthop_rt.type=NEXTHOP_TYPE_IPV4;
       api.nexthop=&nexthop_rt;
       api.metric = metric;
       zebra_route_send(ZEBRA_IPV4_ROUTE_ADD,zclient,&pr,&api);
@@ -70,8 +66,6 @@ void
 rip_zebra_ipv4_delete (struct prefix_ipv4 *p, struct in_addr *nexthop, 
 		       u_int32_t metric)
 {
-
-  //struct zapi_ipv4 api;
   struct zapi_route api;
   struct nexthop nexthop_rt;
   struct prefix pr;
@@ -83,24 +77,12 @@ rip_zebra_ipv4_delete (struct prefix_ipv4 *p, struct in_addr *nexthop,
   pr.u.prefix4.s_addr=p->prefix.s_addr;
   if (zclient->redist[ZEBRA_ROUTE_RIP])
     {
-      /*api.type = ZEBRA_ROUTE_RIP;
-      api.flags = 0;
-      api.message = 0;
-      api.safi = SAFI_UNICAST;
-      SET_FLAG (api.message, ZAPI_MESSAGE_NEXTHOP);
-      api.nexthop_num = 1;
-      api.nexthop = &nexthop;
-      api.ifindex_num = 0;
-      SET_FLAG (api.message, ZAPI_MESSAGE_METRIC);
-      api.metric = metric;
-
-      zapi_ipv4_route (ZEBRA_IPV4_ROUTE_DELETE, zclient, p, &api);*/
-
       zebra_init_route(&api,ZEBRA_ROUTE_RIP,0,SAFI_UNICAST,-1,metric,0);
       SET_FLAG (api.message, ZAPI_MESSAGE_METRIC);
       SET_FLAG (api.message, ZAPI_MESSAGE_NEXTHOP);
       api.nexthop_num = 1;
       nexthop_rt.gate.ipv4.s_addr = nexthop->s_addr;
+      nexthop_rt.type=NEXTHOP_TYPE_IPV4;
       api.nexthop=&nexthop_rt;
       zebra_route_send(ZEBRA_IPV4_ROUTE_DELETE,zclient,&pr,&api);
       rip_global_route_changes++;
@@ -111,47 +93,16 @@ rip_zebra_ipv4_delete (struct prefix_ipv4 *p, struct in_addr *nexthop,
 static int
 rip_zebra_read_ipv4 (int command, struct zclient *zclient, zebra_size_t length)
 {
-
   struct stream *s;
   struct zapi_route api;
   struct prefix p;
   struct nexthop *current;
   unsigned int ifindex;
   struct in_addr nexthop;
-  zebra_route_recieve(command,&api,&p,s,zclient);
+  zebra_route_receive(command,&api,&p,s,zclient);
   ifindex=0;
-  /*struct zapi_ipv4 api;
-  unsigned long ifindex;
-  struct in_addr nexthop;
-  struct prefix_ipv4 p;
-  
-  s = zclient->ibuf;
-  ifindex = 0;
-  nexthop.s_addr = 0;
-
-   Type, flags, message.
-  api.type = stream_getc (s);
-  api.flags = stream_getc (s);
-  api.message = stream_getc (s);
-
-   IPv4 prefix.
-  memset (&p, 0, sizeof (struct prefix_ipv4));
-  p.family = AF_INET;
-  p.prefixlen = stream_getc (s);
-  stream_get (&p.prefix, s, PSIZE (p.prefixlen));
-
-   Nexthop, ifindex, distance, metric.
-  if (CHECK_FLAG (api.message, ZAPI_MESSAGE_NEXTHOP))
-    {
-      api.nexthop_num = stream_getc (s);
-      nexthop.s_addr = stream_get_ipv4 (s);
-    }
-  if (CHECK_FLAG (api.message, ZAPI_MESSAGE_IFINDEX))
-    {
-      api.ifindex_num = stream_getc (s);
-      ifindex = stream_getl (s);
-    }*/
-  if (!(CHECK_FLAG (api.message, ZAPI_MESSAGE_DISTANCE)))
+  nexthop.s_addr=0;
+    if (!(CHECK_FLAG (api.message, ZAPI_MESSAGE_DISTANCE)))
     {
       api.distance = 255;
     }
@@ -162,7 +113,6 @@ rip_zebra_read_ipv4 (int command, struct zclient *zclient, zebra_size_t length)
 
   for(current = api.nexthop;current!=NULL;current=current->next)
     {
-
       if(current->type==NEXTHOP_TYPE_IPV4)
         {
           nexthop.s_addr=current->gate.ipv4.s_addr;
@@ -177,14 +127,14 @@ rip_zebra_read_ipv4 (int command, struct zclient *zclient, zebra_size_t length)
           ifindex=current->ifindex;
         }
 
-    }
+      /* Then fetch IPv4 prefixes. */
+      if (command == ZEBRA_IPV4_ROUTE_ADD)
+        rip_redistribute_add (api.type, RIP_ROUTE_REDISTRIBUTE, (struct prefix_ipv4 *)&p, ifindex,
+                              &nexthop, api.metric, api.distance);
+      else
+        rip_redistribute_delete (api.type, RIP_ROUTE_REDISTRIBUTE, (struct prefix_ipv4 *)&p, ifindex);
 
-  /* Then fetch IPv4 prefixes. */
-  if (command == ZEBRA_IPV4_ROUTE_ADD)
-    rip_redistribute_add (api.type, RIP_ROUTE_REDISTRIBUTE, (struct prefix_ipv4 *)&p, ifindex,
-                          &nexthop, api.metric, api.distance);
-  else 
-    rip_redistribute_delete (api.type, RIP_ROUTE_REDISTRIBUTE, (struct prefix_ipv4 *)&p, ifindex);
+    }
 
   return 0;
 }

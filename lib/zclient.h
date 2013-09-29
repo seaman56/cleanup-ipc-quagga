@@ -85,6 +85,7 @@ struct zclient
   int (*ipv4_route_delete) (int, struct zclient *, uint16_t);
   int (*ipv6_route_add) (int, struct zclient *, uint16_t);
   int (*ipv6_route_delete) (int, struct zclient *, uint16_t);
+
 };
 
 /* Zebra API message flag. */
@@ -92,6 +93,8 @@ struct zclient
 #define ZAPI_MESSAGE_IFINDEX  0x02
 #define ZAPI_MESSAGE_DISTANCE 0x04
 #define ZAPI_MESSAGE_METRIC   0x08
+
+#define ZAPI_DEFAULT_DISTANCE   -1
 
 /* Zserv protocol message header */
 struct zserv_header
@@ -183,12 +186,12 @@ extern void zebra_router_id_update_read (struct stream *s, struct prefix *rid);
 extern int zapi_ipv4_route (u_char, struct zclient *, struct prefix_ipv4 *, 
                             struct zapi_ipv4 *);
 
-extern void zebra_route_recieve(int ,struct zapi_route *,struct prefix *,
+extern void zebra_route_receive(int ,struct zapi_route *,struct prefix *,
                               struct stream *,struct zclient *);
 extern int zebra_init_route(struct zapi_route *, u_char , u_char,safi_t , int ,
                             u_int32_t, u_char );
 
-extern int add_nexthop_route(struct zapi_route *,struct nexthop *);
+extern int zebra_route_add_nexthop(struct zapi_route *,struct nexthop *);
 extern int zebra_route_send (u_char , struct zclient *, struct prefix *,
                  struct zapi_route *);
 

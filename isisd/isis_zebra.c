@@ -227,11 +227,13 @@ static void
 isis_zebra_route_add_ipv4 (struct prefix *prefix,
 			   struct isis_route_info *route_info)
 {
-  u_char message, flags;
-  int psize;
-  struct stream *stream;
+  u_char message, flags, metric;
+  /*int psize;
+  struct stream *stream;*/
+  struct zapi_route api;
   struct isis_nexthop *nexthop;
   struct listnode *node;
+  struct nexthop *nexthop_node;
 
   if (CHECK_FLAG (route_info->flag, ISIS_ROUTE_FLAG_ZEBRA_SYNCED))
     return;
@@ -240,55 +242,34 @@ isis_zebra_route_add_ipv4 (struct prefix *prefix,
     {
       message = 0;
       flags = 0;
+      metric =0;
 
+      metric= route_info->cost;
       SET_FLAG (message, ZAPI_MESSAGE_NEXTHOP);
-      SET_FLAG (message, ZAPI_MESSAGE_METRIC);
-#if 0
-      SET_FLAG (message, ZAPI_MESSAGE_DISTANCE);
-#endif
+      zebra_init_route(&api,ZEBRA_ROUTE_ISIS,flags,SAFI_UNICAST,ZAPI_DEFAULT_DISTANCE,metric,message);
 
-      stream = zclient->obuf;
-      stream_reset (stream);
-      zclient_create_header (stream, ZEBRA_IPV4_ROUTE_ADD);
-      /* type */
-      stream_putc (stream, ZEBRA_ROUTE_ISIS);
-      /* flags */
-      stream_putc (stream, flags);
-      /* message */
-      stream_putc (stream, message);
-      /* SAFI */
-      stream_putw (stream, SAFI_UNICAST);
-      /* prefix information */
-      psize = PSIZE (prefix->prefixlen);
-      stream_putc (stream, prefix->prefixlen);
-      stream_write (stream, (u_char *) & prefix->u.prefix4, psize);
-
-      stream_putc (stream, listcount (route_info->nexthops));
-
-      /* Nexthop, ifindex, distance and metric information */
+      api.nexthop_num= listcount (route_info->nexthops);
+      /*Nexthop, ifindex, distance and metric information*/
       for (ALL_LIST_ELEMENTS_RO (route_info->nexthops, node, nexthop))
-	{
-	  /* FIXME: can it be ? */
-	  if (nexthop->ip.s_addr != INADDR_ANY)
-	    {
-	      stream_putc (stream, ZEBRA_NEXTHOP_IPV4);
-	      stream_put_in_addr (stream, &nexthop->ip);
-	    }
-	  else
-	    {
-	      stream_putc (stream, ZEBRA_NEXTHOP_IFINDEX);
-	      stream_putl (stream, nexthop->ifindex);
-	    }
-	}
-#if 0
-      if (CHECK_FLAG (message, ZAPI_MESSAGE_DISTANCE))
-	stream_putc (stream, route_info->depth);
-#endif
-      if (CHECK_FLAG (message, ZAPI_MESSAGE_METRIC))
-	stream_putl (stream, route_info->cost);
+        {
+          nexthop_node = XCALLOC (MTYPE_NEXTHOP, sizeof (struct nexthop));
+          memset(nexthop_node,0,sizeof(struct nexthop));
+          if (nexthop->ip.s_addr != INADDR_ANY)
+            {
+              nexthop_node->type=NEXTHOP_TYPE_IPV4;
+              nexthop_node->gate.ipv4.s_addr=nexthop->ip.s_addr;
+              zebra_route_add_nexthop(&api,nexthop_node);
+            }
+          else
+            {
+              nexthop_node->type=NEXTHOP_TYPE_IFINDEX;
+              nexthop_node->ifindex=nexthop->ifindex;
+              zebra_route_add_nexthop(&api,nexthop_node);
+            }
+        }
 
-      stream_putw_at (stream, 0, stream_get_endp (stream));
-      zclient_send_message(zclient);
+      zebra_route_send(ZEBRA_IPV4_ROUTE_ADD,zclient,prefix,&api);
+
       SET_FLAG (route_info->flag, ISIS_ROUTE_FLAG_ZEBRA_SYNCED);
       UNSET_FLAG (route_info->flag, ISIS_ROUTE_FLAG_ZEBRA_RESYNC);
     }
@@ -298,7 +279,16 @@ static void
 isis_zebra_route_del_ipv4 (struct prefix *prefix,
 			   struct isis_route_info *route_info)
 {
-  struct zapi_ipv4 api;
+  struct zapi_route api;
+  if (zclient->redist[ZEBRA_ROUTE_ISIS])
+    {
+      zebra_init_route(&api,ZEBRA_ROUTE_ISIS,0,SAFI_UNICAST,ZAPI_DEFAULT_DISTANCE,0,0);
+      UNSET_FLAG(api.message,ZAPI_MESSAGE_METRIC);
+
+      zebra_route_send(ZEBRA_IPV4_ROUTE_DELETE, zclient, prefix, &api);
+    }
+
+ /* struct zapi_ipv4 api;
   struct prefix_ipv4 prefix4;
 
   if (zclient->redist[ZEBRA_ROUTE_ISIS])
@@ -311,7 +301,7 @@ isis_zebra_route_del_ipv4 (struct prefix *prefix,
       prefix4.prefixlen = prefix->prefixlen;
       prefix4.prefix = prefix->u.prefix4;
       zapi_ipv4_route (ZEBRA_IPV4_ROUTE_DELETE, zclient, &prefix4, &api);
-    }
+    }*/
   UNSET_FLAG (route_info->flag, ISIS_ROUTE_FLAG_ZEBRA_SYNCED);
 
   return;
@@ -516,7 +506,17 @@ static int
 isis_zebra_read_ipv4 (int command, struct zclient *zclient,
 		      zebra_size_t length)
 {
+  struct prefix p;
+  struct zapi_route api;
   struct stream *stream;
+
+  zebra_route_receive(command,&api,&p,stream,zclient);
+  if (command == ZEBRA_IPV4_ROUTE_ADD)
+    {
+      if (isis->debugs & DEBUG_ZEBRA)
+        zlog_debug ("IPv4 Route add from Z");
+    }
+  /*struct stream *stream;
   struct zapi_ipv4 api;
   struct prefix_ipv4 p;
   unsigned long ifindex;
@@ -556,6 +556,7 @@ isis_zebra_read_ipv4 (int command, struct zclient *zclient,
       if (isis->debugs & DEBUG_ZEBRA)
 	zlog_debug ("IPv4 Route add from Z");
     }
+*/
 
   return 0;
 }

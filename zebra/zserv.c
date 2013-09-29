@@ -357,7 +357,7 @@ zsend_route_multipath (int cmd, struct zserv *client, struct prefix *p,
   struct nexthop *nexthop;
   unsigned long nexthop_num_postion = 0, message_position = 0;
   int nexthop_num = 0;
-  u_char zapi_flags = 0;
+  u_char message = 0;
   
   s = client->obuf;
   stream_reset (s);
@@ -388,13 +388,11 @@ zsend_route_multipath (int cmd, struct zserv *client, struct prefix *p,
   /* Nexthop */
   nexthop_num_postion = stream_get_endp (s);
   stream_putc (s, 0); /*  fill it as empty(eight 0 bits)*/
-  
   for (nexthop = rib->nexthop; nexthop; nexthop = nexthop->next)
     {
       if (CHECK_FLAG (nexthop->flags, NEXTHOP_FLAG_FIB))
         {
-          SET_FLAG (zapi_flags, ZAPI_MESSAGE_NEXTHOP);
-          SET_FLAG (zapi_flags, ZAPI_MESSAGE_IFINDEX);//no need
+          SET_FLAG (message, ZAPI_MESSAGE_NEXTHOP);
 
           /*selecting nexthop type */
           switch(nexthop->type) 
@@ -403,28 +401,31 @@ zsend_route_multipath (int cmd, struct zserv *client, struct prefix *p,
                 stream_putc (s, ZEBRA_NEXTHOP_IPV4);
                 stream_put_ipv4(s,nexthop->gate.ipv4.s_addr);
                 break;
+              case NEXTHOP_TYPE_IPV4_IFNAME:
               case NEXTHOP_TYPE_IPV4_IFINDEX:
                 stream_putc (s, ZEBRA_NEXTHOP_IPV4_IFINDEX);
                 stream_put_ipv4(s, nexthop->gate.ipv4.s_addr);
                 stream_putl (s, nexthop->ifindex);
                 break;
+              case NEXTHOP_TYPE_IFNAME:
               case NEXTHOP_TYPE_IFINDEX:
                 stream_putc (s, ZEBRA_NEXTHOP_IFINDEX);
                 stream_putl (s, nexthop->ifindex);
                 break;
-              case NEXTHOP_TYPE_IFNAME:
-                break;
-              case NEXTHOP_TYPE_IPV4_IFNAME:
-                break;
-/*
+
 #ifdef HAVE_IPV6
               case NEXTHOP_TYPE_IPV6:
+                stream_putc (s, ZEBRA_NEXTHOP_IPV6);
+                stream_write (s, (u_char *) &nexthop->gate.ipv6, IPV6_MAX_BYTELEN);
+                break;
               case NEXTHOP_TYPE_IPV6_IFINDEX:
               case NEXTHOP_TYPE_IPV6_IFNAME:
-                stream_write (s, (u_char *) &nexthop->gate.ipv6, 16);
+                stream_putc (s, ZEBRA_NEXTHOP_IPV6_IFINDEX);
+                stream_write (s, (u_char *) &nexthop->gate.ipv6, IPV6_MAX_BYTELEN);
+                stream_putl (s, nexthop->ifindex);
                 break;
 #endif
-*/
+
               default:
                 if (cmd == ZEBRA_IPV4_ROUTE_ADD 
                     || cmd == ZEBRA_IPV4_ROUTE_DELETE)
@@ -444,23 +445,21 @@ zsend_route_multipath (int cmd, struct zserv *client, struct prefix *p,
                     stream_putl (s, nexthop->ifindex);
                   }
               }
-
           nexthop_num++;
-
         }
     }
 
   /* Metric */
   if (cmd == ZEBRA_IPV4_ROUTE_ADD || cmd == ZEBRA_IPV6_ROUTE_ADD)
     {
-      SET_FLAG (zapi_flags, ZAPI_MESSAGE_DISTANCE);
+      SET_FLAG (message, ZAPI_MESSAGE_DISTANCE);
       stream_putc (s, rib->distance);
-      SET_FLAG (zapi_flags, ZAPI_MESSAGE_METRIC);
+      SET_FLAG (message, ZAPI_MESSAGE_METRIC);
       stream_putl (s, rib->metric);
     }
   
   /* write correct message flags value */
-  stream_putc_at (s, message_position, zapi_flags);
+  stream_putc_at (s, message_position, message);
   
   /* Write next-hop number */
   if (nexthop_num)

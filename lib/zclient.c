@@ -581,39 +581,38 @@ zebra_init_route(struct zapi_route *zr, u_char type, u_char flags,
    memset(zr, 0, sizeof(struct zapi_route));
    zr->type = type;
    zr->flags = flags;
-
    zr->safi = safi;
+   SET_FLAG(zr->message, message);
    if (distance >= 0)
      {
        SET_FLAG(zr->message, ZAPI_MESSAGE_DISTANCE);
        zr->distance = distance;
      }
-
+   /*use a long long int and check metric >0 before set flag*/
      SET_FLAG (zr->message, ZAPI_MESSAGE_METRIC);
      zr->metric = metric;
-
 return 0;
 }
 
 void
-zebra_route_recieve(int command, struct zapi_route *rt, struct prefix *p,
+zebra_route_receive(int command, struct zapi_route *rt, struct prefix *p,
                   struct stream *s, struct zclient *z)
 {
   u_char nexthop_type;
+  u_char ifname_len;
   memset(p, 0, sizeof(struct prefix));
   memset(rt,0,sizeof(struct zapi_route));
 
   s = z->ibuf;
-
   rt->type = stream_getc (s);
   rt->flags = stream_getc (s);
   rt->message = stream_getc (s);
+
   if(command== ZEBRA_IPV4_ROUTE_ADD || command== ZEBRA_IPV4_ROUTE_DELETE)
     {
       p->family=AF_INET;
       p->prefixlen=stream_getc (s);
       stream_get (&p->u.prefix4, s, PSIZE (p->prefixlen));
-
       struct nexthop *nexthop;
       rt->nexthop=NULL;
       if (CHECK_FLAG (rt->message, ZAPI_MESSAGE_NEXTHOP))
@@ -626,62 +625,83 @@ zebra_route_recieve(int command, struct zapi_route *rt, struct prefix *p,
                nexthop_type=stream_getc (s);
                switch (nexthop_type)
                  {
+                   case ZEBRA_NEXTHOP_IFNAME:
                    case ZEBRA_NEXTHOP_IFINDEX:
                      nexthop->type=NEXTHOP_TYPE_IFINDEX;
-                     nexthop->ifindex=stream_getl (s);
-                     break;
-                   case ZEBRA_NEXTHOP_IFNAME:
+                     unsigned long ifindex=0;
+                     ifindex=stream_getl (s);
+                     nexthop->ifindex=ifindex;
                      break;
                    case ZEBRA_NEXTHOP_IPV4:
                      nexthop->type=NEXTHOP_TYPE_IPV4;
                      nexthop->gate.ipv4.s_addr=stream_get_ipv4 (s);
-                     break;
-                   case ZEBRA_NEXTHOP_IPV4_IFINDEX:
-                     nexthop->type=NEXTHOP_TYPE_IPV4_IFINDEX;
-                     nexthop->gate.ipv4.s_addr=stream_get_ipv4 (s);
-                     nexthop->ifindex=stream_getl (s);
-                     break;
-                   case ZEBRA_NEXTHOP_IPV4_IFNAME:
-                     break;
+                   break;
+                     case ZEBRA_NEXTHOP_IPV4_IFNAME:
+                     case ZEBRA_NEXTHOP_IPV4_IFINDEX:
+                       nexthop->type=NEXTHOP_TYPE_IPV4_IFINDEX;
+                       nexthop->gate.ipv4.s_addr=stream_get_ipv4 (s);
+                       nexthop->ifindex=stream_getl (s);
+                       break;
                  }
 
-
-
-               //nexthop->gate.ipv4.s_addr=stream_get_ipv4 (s);
-
-               add_nexthop_route(rt,nexthop);
+               zebra_route_add_nexthop(rt,nexthop);
              }
            }
-       /*if (CHECK_FLAG (rt->message, ZAPI_MESSAGE_IFINDEX))
-         {
-           rt->ifindex_num = stream_getc (s);
-           for(int i=0;i<rt->ifindex_num;i++)
-             {
-               nexthop = XCALLOC (MTYPE_NEXTHOP, sizeof (struct nexthop));
-               nexthop->type=NEXTHOP_TYPE_IFINDEX;
-               nexthop->ifindex=stream_getl (s);
-               add_nexthop_route(rt,nexthop);
-             }
-         }*/
-
-
     }
+#ifdef HAVE_IPV6
   if(command== ZEBRA_IPV6_ROUTE_ADD || command== ZEBRA_IPV6_ROUTE_DELETE )
-      {
+    {
+      p->family = AF_INET6;
+      p->prefixlen = stream_getc (s);
+      stream_get (&p->u.prefix6, s, PSIZE (p->prefixlen));
 
+      struct nexthop *nexthop;
+      rt->nexthop=NULL;
+      if (CHECK_FLAG (rt->message, ZAPI_MESSAGE_NEXTHOP))
+        {
+          rt->nexthop_num = stream_getc (s);
+          for(int i=0;i<rt->nexthop_num;i++)
+            {
+              nexthop = XCALLOC (MTYPE_NEXTHOP, sizeof (struct nexthop));
+              memset(nexthop,0,sizeof(struct nexthop));
+              nexthop_type=stream_getc (s);
+              unsigned long ifindex=0;
+              switch (nexthop_type)
+                {
+                  case  ZEBRA_NEXTHOP_IPV6:
+                    nexthop->type=NEXTHOP_TYPE_IPV6;
+                    stream_get (&nexthop->gate.ipv6, s, IPV6_MAX_BYTELEN);
+                    break;
+                  case ZEBRA_NEXTHOP_IFNAME:
+                  case ZEBRA_NEXTHOP_IFINDEX:
+                    nexthop->type=NEXTHOP_TYPE_IFINDEX;
+                    ifindex=stream_getl (s);
+                    nexthop->ifindex=ifindex;
+                    break;
+                  case ZEBRA_NEXTHOP_IPV6_IFNAME:
+                  case ZEBRA_NEXTHOP_IPV6_IFINDEX:
+                    nexthop->type=NEXTHOP_TYPE_IPV6_IFINDEX;
+                    stream_get (&nexthop->gate.ipv6, s, IPV6_MAX_BYTELEN);
+                    ifindex=stream_getl (s);
+                    nexthop->ifindex=ifindex;
+                    break;
+
+                  }
+                zebra_route_add_nexthop(rt,nexthop);
+              }
+          }
       }
+#endif /* HAVE_IPV6 */
   if (CHECK_FLAG (rt->message, ZAPI_MESSAGE_DISTANCE))
     rt->distance = stream_getc (s);
   if (CHECK_FLAG (rt->message, ZAPI_MESSAGE_METRIC))
     rt->metric = stream_getl (s);
-
-}
+ }
 int
-add_nexthop_route(struct zapi_route *api,struct nexthop *new)
+zebra_route_add_nexthop(struct zapi_route *api,struct nexthop *new)
 {
-
   struct nexthop *last;
- for(last=api->nexthop;last&&last->next;last=last->next)
+  for(last=api->nexthop;last&&last->next;last=last->next)
     ;
    if(last)
     {
@@ -696,14 +716,12 @@ add_nexthop_route(struct zapi_route *api,struct nexthop *new)
       api->nexthop->next=NULL;
       api->nexthop->prev=NULL;
     }
-
   return 0;
 }
 int
 zebra_route_send(u_char cmd, struct zclient *zclient, struct prefix *p,
                  struct zapi_route *api)
 {
-
   int i;
   int psize;
   struct stream *s;
@@ -725,7 +743,7 @@ zebra_route_send(u_char cmd, struct zclient *zclient, struct prefix *p,
       /* adding prefix information. */
       psize = PSIZE (p->prefixlen);
       stream_putc (s, p->prefixlen);
-      stream_write (s, (u_char *) & (p->u.prefix4), psize);
+      stream_write (s, (u_char *) &p->u.prefix4, psize);
       if (CHECK_FLAG (api->message, ZAPI_MESSAGE_NEXTHOP))
         {
           if (CHECK_FLAG (api->flags, ZEBRA_FLAG_BLACKHOLE))
@@ -745,26 +763,18 @@ zebra_route_send(u_char cmd, struct zclient *zclient, struct prefix *p,
                     case NEXTHOP_TYPE_IPV4:
                       //add if to select only v4 nexthops
                       stream_putc (s, ZEBRA_NEXTHOP_IPV4);
-                      //stream_put_in_addr (s, &(current->gate.ipv4));
                       stream_put_ipv4(s,current->gate.ipv4.s_addr);
                     break;
+                    case NEXTHOP_TYPE_IFNAME:
                     case NEXTHOP_TYPE_IFINDEX:
                       stream_putc (s, ZEBRA_NEXTHOP_IFINDEX);
                       stream_putl (s, current->ifindex);
                       break;
-                    case NEXTHOP_TYPE_IFNAME:
-                      //stream_putc (s, ZEBRA_NEXTHOP_IFNAME)
-                      //stream_putc (s, current->ifname);//how to give ifname first length and then name
-                      break;
+                    case NEXTHOP_TYPE_IPV4_IFNAME:
                     case NEXTHOP_TYPE_IPV4_IFINDEX:
                       stream_putc (s, ZEBRA_NEXTHOP_IPV4_IFINDEX);
                       stream_put_ipv4(s,current->gate.ipv4.s_addr);
                       stream_putl (s, current->ifindex);
-                      break;
-                    case NEXTHOP_TYPE_IPV4_IFNAME:
-                      stream_putc (s, ZEBRA_NEXTHOP_IPV4_IFNAME);
-                      stream_put_ipv4(s,current->gate.ipv4.s_addr);
-                      //stream_putc (s, current->ifname);//how to give ifname first length and then name
                       break;
                     default:
                       break;
@@ -778,22 +788,32 @@ zebra_route_send(u_char cmd, struct zclient *zclient, struct prefix *p,
 #ifdef HAVE_IPV6
   if(cmd== ZEBRA_IPV6_ROUTE_ADD || cmd== ZEBRA_IPV6_ROUTE_DELETE)
     {
+      stream_putc (s, p->prefixlen);
+      stream_write (s, (u_char *) & p->u.prefix6, PSIZE (p->prefixlen));
+
       if (CHECK_FLAG (api->message, ZAPI_MESSAGE_NEXTHOP))
         {
-          stream_putc (s, api->nexthop_num + api->ifindex_num);
+          stream_putc (s, api->nexthop_num);
           current=api->nexthop;
           for (i = 0; i < api->nexthop_num; i++)
             {
-              if(current->rtype==ZEBRA_NEXTHOP_IPV6)
+              switch (current->type)
                 {
-                  stream_putc (s, ZEBRA_NEXTHOP_IPV6);
-                  stream_write (s, (u_char *)& current->gate.ipv6, 16);
-
-                }
-              if(current->rtype==ZEBRA_NEXTHOP_IFINDEX)
-                {
-                  stream_putc (s, ZEBRA_NEXTHOP_IFINDEX);
-                  stream_putl (s, current->ifindex);
+                  case NEXTHOP_TYPE_IPV6:
+                    stream_putc (s, ZEBRA_NEXTHOP_IPV6);
+                    stream_write (s, (u_char *)& current->gate.ipv6, IPV6_MAX_BYTELEN);
+                    break;
+                  case NEXTHOP_TYPE_IFNAME:
+                  case NEXTHOP_TYPE_IFINDEX:
+                    stream_putc (s, ZEBRA_NEXTHOP_IFINDEX);
+                    stream_putl (s, current->ifindex);
+                    break;
+                  case NEXTHOP_TYPE_IPV6_IFNAME:
+                  case NEXTHOP_TYPE_IPV6_IFINDEX:
+                    stream_putc (s, ZEBRA_NEXTHOP_IPV6_IFINDEX);
+                    stream_write (s, (u_char *)& current->gate.ipv6, IPV6_MAX_BYTELEN);
+                    stream_putl (s, current->ifindex);
+                    break;
                 }
             }
           current=current->next;

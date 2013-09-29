@@ -196,72 +196,36 @@ ospf6_zebra_read_ipv6 (int command, struct zclient *zclient,
                        zebra_size_t length)
 {
   struct stream *s;
-  struct zapi_ipv6 api;
-  unsigned long ifindex;
-  struct prefix_ipv6 p;
-  struct in6_addr *nexthop;
+  struct prefix p;
+  struct zapi_route api;
 
-  s = zclient->ibuf;
-  ifindex = 0;
-  nexthop = NULL;
-  memset (&api, 0, sizeof (api));
+  zebra_route_receive(command,&api,&p,s,zclient);
 
-  /* Type, flags, message. */
-  api.type = stream_getc (s);
-  api.flags = stream_getc (s);
-  api.message = stream_getc (s);
-
-  /* IPv6 prefix. */
-  memset (&p, 0, sizeof (struct prefix_ipv6));
-  p.family = AF_INET6;
-  p.prefixlen = stream_getc (s);
-  stream_get (&p.prefix, s, PSIZE (p.prefixlen));
-
-  /* Nexthop, ifindex, distance, metric. */
-  if (CHECK_FLAG (api.message, ZAPI_MESSAGE_NEXTHOP))
-    {
-      api.nexthop_num = stream_getc (s);
-      nexthop = (struct in6_addr *)
-        malloc (api.nexthop_num * sizeof (struct in6_addr));
-      stream_get (nexthop, s, api.nexthop_num * sizeof (struct in6_addr));
-    }
-  if (CHECK_FLAG (api.message, ZAPI_MESSAGE_IFINDEX))
-    {
-      api.ifindex_num = stream_getc (s);
-      ifindex = stream_getl (s);
-    }
-  if (CHECK_FLAG (api.message, ZAPI_MESSAGE_DISTANCE))
-    api.distance = stream_getc (s);
-  else
-    api.distance = 0;
-  if (CHECK_FLAG (api.message, ZAPI_MESSAGE_METRIC))
-    api.metric = stream_getl (s);
-  else
-    api.metric = 0;
-
+   /*only prints first nexthop ??? does it need to be changed*/
   if (IS_OSPF6_DEBUG_ZEBRA (RECV))
+     {
+       char prefixstr[128], nexthopstr[128];
+       prefix2str (&p, prefixstr, sizeof (prefixstr));
+       if (&api.nexthop->gate.ipv6)
+         inet_ntop (AF_INET6, &api.nexthop->gate.ipv6, nexthopstr, sizeof (nexthopstr));
+       else
+         snprintf (nexthopstr, sizeof (nexthopstr), "::");
+
+       zlog_debug ("Zebra Receive route %s: %s %s nexthop %s ifindex %ld",
+                   (command == ZEBRA_IPV6_ROUTE_ADD ? "add" : "delete"),
+                   zebra_route_string(api.type), prefixstr, nexthopstr, api.nexthop->ifindex);
+     }
+  struct nexthop *nexthop;
+  nexthop=api.nexthop;
+  for(int i=0;i<api.nexthop_num;i++)
     {
-      char prefixstr[128], nexthopstr[128];
-      prefix2str ((struct prefix *)&p, prefixstr, sizeof (prefixstr));
-      if (nexthop)
-        inet_ntop (AF_INET6, nexthop, nexthopstr, sizeof (nexthopstr));
-      else
-        snprintf (nexthopstr, sizeof (nexthopstr), "::");
-
-      zlog_debug ("Zebra Receive route %s: %s %s nexthop %s ifindex %ld",
-		  (command == ZEBRA_IPV6_ROUTE_ADD ? "add" : "delete"),
-		  zebra_route_string(api.type), prefixstr, nexthopstr, ifindex);
+      if (command == ZEBRA_IPV6_ROUTE_ADD)
+           ospf6_asbr_redistribute_add (api.type, nexthop->ifindex, &p,
+                                        api.nexthop_num, &nexthop->gate.ipv6);
+         else
+           ospf6_asbr_redistribute_remove (api.type, nexthop->ifindex, &p);
+      nexthop=nexthop->next;
     }
- 
-  if (command == ZEBRA_IPV6_ROUTE_ADD)
-    ospf6_asbr_redistribute_add (api.type, ifindex, (struct prefix *) &p,
-                                 api.nexthop_num, nexthop);
-  else
-    ospf6_asbr_redistribute_remove (api.type, ifindex, (struct prefix *) &p);
-
-  if (CHECK_FLAG (api.message, ZAPI_MESSAGE_NEXTHOP))
-    free (nexthop);
-
   return 0;
 }
 
@@ -350,13 +314,11 @@ static struct cmd_node zebra_node =
 static void
 ospf6_zebra_route_update (int type, struct ospf6_route *request)
 {
-  struct zapi_ipv6 api;
+  struct zapi_route api;
   char buf[64];
   int nhcount;
-  struct in6_addr **nexthops;
-  unsigned int *ifindexes;
+  struct nexthop *nexthop;
   int i, ret = 0;
-  struct prefix_ipv6 *dest;
 
   if (IS_OSPF6_DEBUG_ZEBRA (SEND))
     {
@@ -413,27 +375,14 @@ ospf6_zebra_route_update (int type, struct ospf6_route *request)
       return;
     }
 
-  /* allocate memory for nexthop_list */
-  nexthops = XCALLOC (MTYPE_OSPF6_OTHER,
-                      nhcount * sizeof (struct in6_addr *));
-  if (nexthops == NULL)
-    {
-      zlog_warn ("Can't send route to zebra: malloc failed");
-      return;
-    }
-
+  zebra_init_route(&api,ZEBRA_ROUTE_OSPF6,0,SAFI_UNICAST,ZAPI_DEFAULT_DISTANCE,0,0);
+  api.metric = (request->path.metric_type == 2 ? request->path.cost_e2 : request->path.cost);
+  api.nexthop_num = 2*nhcount;
+  SET_FLAG (api.message, ZAPI_MESSAGE_NEXTHOP);
   /* allocate memory for ifindex_list */
-  ifindexes = XCALLOC (MTYPE_OSPF6_OTHER,
-                       nhcount * sizeof (unsigned int));
-  if (ifindexes == NULL)
-    {
-      zlog_warn ("Can't send route to zebra: malloc failed");
-      XFREE (MTYPE_OSPF6_OTHER, nexthops);
-      return;
-    }
-
   for (i = 0; i < nhcount; i++)
     {
+
       if (IS_OSPF6_DEBUG_ZEBRA (SEND))
 	{
 	  char ifname[IFNAMSIZ];
@@ -444,38 +393,29 @@ ospf6_zebra_route_update (int type, struct ospf6_route *request)
 	  zlog_debug ("  nexthop: %s%%%.*s(%d)", buf, IFNAMSIZ, ifname,
 		      request->nexthop[i].ifindex);
 	}
-      nexthops[i] = &request->nexthop[i].address;
-      ifindexes[i] = request->nexthop[i].ifindex;
+      nexthop = XCALLOC (MTYPE_NEXTHOP, sizeof (struct nexthop));
+      memset(nexthop,0,sizeof(struct nexthop));
+      nexthop->type=NEXTHOP_TYPE_IPV6;
+      nexthop->gate.ipv6.__in6_u = request->nexthop[i].address.__in6_u;
+      zebra_route_add_nexthop(&api,nexthop);
+
+      nexthop = XCALLOC (MTYPE_NEXTHOP, sizeof (struct nexthop));
+      memset(nexthop,0,sizeof(struct nexthop));
+      nexthop->type=NEXTHOP_TYPE_IFINDEX;
+      nexthop->ifindex = request->nexthop[i].ifindex;
+      zebra_route_add_nexthop(&api,nexthop);
     }
 
-  api.type = ZEBRA_ROUTE_OSPF6;
-  api.flags = 0;
-  api.message = 0;
-  api.safi = SAFI_UNICAST;
-  SET_FLAG (api.message, ZAPI_MESSAGE_NEXTHOP);
-  api.nexthop_num = nhcount;
-  api.nexthop = nexthops;
-  SET_FLAG (api.message, ZAPI_MESSAGE_IFINDEX);
-  api.ifindex_num = nhcount;
-  api.ifindex = ifindexes;
-  SET_FLAG (api.message, ZAPI_MESSAGE_METRIC);
-  api.metric = (request->path.metric_type == 2 ?
-                request->path.cost_e2 : request->path.cost);
-
-  dest = (struct prefix_ipv6 *) &request->prefix;
   if (type == REM)
-    ret = zapi_ipv6_route (ZEBRA_IPV6_ROUTE_DELETE, zclient, dest, &api);
-  else
-    ret = zapi_ipv6_route (ZEBRA_IPV6_ROUTE_ADD, zclient, dest, &api);
+     ret = zebra_route_send(ZEBRA_IPV6_ROUTE_DELETE, zclient, &request->prefix, &api);
+   else
+     ret = zebra_route_send (ZEBRA_IPV6_ROUTE_ADD, zclient, &request->prefix, &api);
 
-  if (ret < 0)
-    zlog_err ("zapi_ipv6_route() %s failed: %s",
-              (type == REM ? "delete" : "add"), safe_strerror (errno));
+   if (ret < 0)
+      zlog_err ("zapi_ipv6_route() %s failed: %s",
+                (type == REM ? "delete" : "add"), safe_strerror (errno));
 
-  XFREE (MTYPE_OSPF6_OTHER, nexthops);
-  XFREE (MTYPE_OSPF6_OTHER, ifindexes);
-
-  return;
+   return;
 }
 
 void
