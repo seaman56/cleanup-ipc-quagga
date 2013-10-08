@@ -353,113 +353,124 @@ zsend_route_multipath (int cmd, struct zserv *client, struct prefix *p,
                        struct rib *rib)
 {
   int psize;
-  struct stream *s;
-  struct nexthop *nexthop;
-  unsigned long nhnummark = 0, messmark = 0;
-  int nhnum = 0;
-  u_char zapi_flags = 0;
-  
-  s = client->obuf;
-  stream_reset (s);
-  
-  zserv_create_header (s, cmd);
-  
-  /* Put type and nexthop. */
-  stream_putc (s, rib->type);
-  stream_putc (s, rib->flags);
-  
-  /* marker for message flags field */
-  messmark = stream_get_endp (s);
-  stream_putc (s, 0);
+    struct stream *s;
+    struct nexthop *nexthop;
+    unsigned long nexthop_num_postion = 0, message_position = 0;
+    int nexthop_num = 0;
+    u_char message = 0;
 
-  /* Prefix. */
-  psize = PSIZE (p->prefixlen);
-  stream_putc (s, p->prefixlen);
-  stream_write (s, (u_char *) & p->u.prefix, psize);
+    s = client->obuf;
+    stream_reset (s);
 
-  /* 
-   * XXX The message format sent by zebra below does not match the format
-   * of the corresponding message expected by the zebra server
-   * itself (e.g., see zread_ipv4_add). The nexthop_num is not set correctly,
-   * (is there a bug on the client side if more than one segment is sent?)
-   * nexthop ZEBRA_NEXTHOP_IPV4 is never set, ZEBRA_NEXTHOP_IFINDEX 
-   * is hard-coded.
-   */
-  /* Nexthop */
-  
-  for (nexthop = rib->nexthop; nexthop; nexthop = nexthop->next)
-    {
-      if (CHECK_FLAG (nexthop->flags, NEXTHOP_FLAG_FIB))
-        {
-          SET_FLAG (zapi_flags, ZAPI_MESSAGE_NEXTHOP);
-          SET_FLAG (zapi_flags, ZAPI_MESSAGE_IFINDEX);
-          
-          if (nhnummark == 0)
-            {
-              nhnummark = stream_get_endp (s);
-              stream_putc (s, 1); /* placeholder */
-            }
-          
-          nhnum++;
+    zserv_create_header (s, cmd);
 
-          switch(nexthop->type) 
-            {
-              case NEXTHOP_TYPE_IPV4:
-              case NEXTHOP_TYPE_IPV4_IFINDEX:
-                stream_put_in_addr (s, &nexthop->gate.ipv4);
-                break;
-#ifdef HAVE_IPV6
-              case NEXTHOP_TYPE_IPV6:
-              case NEXTHOP_TYPE_IPV6_IFINDEX:
-              case NEXTHOP_TYPE_IPV6_IFNAME:
-                stream_write (s, (u_char *) &nexthop->gate.ipv6, 16);
-                break;
-#endif
-              default:
-                if (cmd == ZEBRA_IPV4_ROUTE_ADD 
-                    || cmd == ZEBRA_IPV4_ROUTE_DELETE)
-                  {
-                    struct in_addr empty;
-                    memset (&empty, 0, sizeof (struct in_addr));
-                    stream_write (s, (u_char *) &empty, IPV4_MAX_BYTELEN);
-                  }
-                else
-                  {
-                    struct in6_addr empty;
-                    memset (&empty, 0, sizeof (struct in6_addr));
-                    stream_write (s, (u_char *) &empty, IPV6_MAX_BYTELEN);
-                  }
-              }
+    /* Put type and nexthop. */
+    stream_putc (s, rib->type);
+    stream_putc (s, rib->flags);
 
-          /* Interface index. */
-          stream_putc (s, 1);
-          stream_putl (s, nexthop->ifindex);
+    /* get the position of message and fill it as empty(eight 0 bits) */
+    message_position = stream_get_endp (s);
+    stream_putc (s, 0);
 
-          break;
-        }
-    }
+    /* Prefix. */
+    psize = PSIZE (p->prefixlen);
+    stream_putc (s, p->prefixlen);
+    stream_write (s, (u_char *) & p->u.prefix, psize);
 
-  /* Metric */
-  if (cmd == ZEBRA_IPV4_ROUTE_ADD || cmd == ZEBRA_IPV6_ROUTE_ADD)
-    {
-      SET_FLAG (zapi_flags, ZAPI_MESSAGE_DISTANCE);
-      stream_putc (s, rib->distance);
-      SET_FLAG (zapi_flags, ZAPI_MESSAGE_METRIC);
-      stream_putl (s, rib->metric);
-    }
-  
-  /* write real message flags value */
-  stream_putc_at (s, messmark, zapi_flags);
-  
-  /* Write next-hop number */
-  if (nhnummark)
-    stream_putc_at (s, nhnummark, nhnum);
-  
-  /* Write packet size. */
-  stream_putw_at (s, 0, stream_get_endp (s));
+    /*
+  * XXX The message format sent by zebra below does not match the format
+  * of the corresponding message expected by the zebra server
+  * itself (e.g., see zread_ipv4_add). The nexthop_num is not set correctly,
+  * (is there a bug on the client side if more than one segment is sent?)
+  * nexthop ZEBRA_NEXTHOP_IPV4 is never set, ZEBRA_NEXTHOP_IFINDEX
+  * is hard-coded.
+  */
+    /* Nexthop */
+    nexthop_num_postion = stream_get_endp (s);
+    stream_putc (s, 0); /* fill it as empty(eight 0 bits)*/
+    for (nexthop = rib->nexthop; nexthop; nexthop = nexthop->next)
+      {
+        if (CHECK_FLAG (nexthop->flags, NEXTHOP_FLAG_FIB))
+          {
+            SET_FLAG (message, ZAPI_MESSAGE_NEXTHOP);
 
-  return zebra_server_send_message(client);
+            /*selecting nexthop type */
+            switch(nexthop->type)
+              {
+                case NEXTHOP_TYPE_IPV4:
+                  stream_putc (s, ZEBRA_NEXTHOP_IPV4);
+                  stream_put_ipv4(s,nexthop->gate.ipv4.s_addr);
+                  break;
+                case NEXTHOP_TYPE_IPV4_IFNAME:
+                case NEXTHOP_TYPE_IPV4_IFINDEX:
+                  stream_putc (s, ZEBRA_NEXTHOP_IPV4_IFINDEX);
+                  stream_put_ipv4(s, nexthop->gate.ipv4.s_addr);
+                  stream_putl (s, nexthop->ifindex);
+                  break;
+                case NEXTHOP_TYPE_IFNAME:
+                case NEXTHOP_TYPE_IFINDEX:
+                  stream_putc (s, ZEBRA_NEXTHOP_IFINDEX);
+                  stream_putl (s, nexthop->ifindex);
+                  break;
+
+  #ifdef HAVE_IPV6
+                case NEXTHOP_TYPE_IPV6:
+                  stream_putc (s, ZEBRA_NEXTHOP_IPV6);
+                  stream_write (s, (u_char *) &nexthop->gate.ipv6, IPV6_MAX_BYTELEN);
+                  break;
+                case NEXTHOP_TYPE_IPV6_IFINDEX:
+                case NEXTHOP_TYPE_IPV6_IFNAME:
+                  stream_putc (s, ZEBRA_NEXTHOP_IPV6_IFINDEX);
+                  stream_write (s, (u_char *) &nexthop->gate.ipv6, IPV6_MAX_BYTELEN);
+                  stream_putl (s, nexthop->ifindex);
+                  break;
+  #endif
+
+                default:
+                  if (cmd == ZEBRA_IPV4_ROUTE_ADD
+                      || cmd == ZEBRA_IPV4_ROUTE_DELETE)
+                    {
+                      struct in_addr empty;
+                      memset (&empty, 0, sizeof (struct in_addr));
+                      stream_putc (s, ZEBRA_NEXTHOP_IPV4_IFINDEX);
+                      stream_write (s, (u_char *) &empty, IPV4_MAX_BYTELEN);
+                      stream_putl (s, nexthop->ifindex);
+                    }
+                  else
+                    {
+                      struct in6_addr empty;
+                      memset (&empty, 0, sizeof (struct in6_addr));
+                      stream_putc (s, ZEBRA_NEXTHOP_IPV6_IFINDEX);
+                      stream_write (s, (u_char *) &empty, IPV6_MAX_BYTELEN);
+                      stream_putl (s, nexthop->ifindex);
+                    }
+                }
+            nexthop_num++;
+          }
+      }
+
+    /* Metric */
+    if (cmd == ZEBRA_IPV4_ROUTE_ADD || cmd == ZEBRA_IPV6_ROUTE_ADD)
+      {
+        SET_FLAG (message, ZAPI_MESSAGE_DISTANCE);
+        stream_putc (s, rib->distance);
+        SET_FLAG (message, ZAPI_MESSAGE_METRIC);
+        stream_putl (s, rib->metric);
+      }
+
+    /* write correct message flags value */
+    stream_putc_at (s, message_position, message);
+
+    /* Write next-hop number */
+    if (nexthop_num)
+      stream_putc_at (s, nexthop_num_postion, nexthop_num);
+
+    /* Write packet size. */
+    stream_putw_at (s, 0, stream_get_endp (s));
+
+    return zebra_server_send_message(client);
 }
+
 
 #ifdef HAVE_IPV6
 static int
