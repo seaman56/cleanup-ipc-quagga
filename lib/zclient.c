@@ -781,6 +781,8 @@ zebra_route_send(u_char cmd, struct zclient *zclient, struct prefix *p,
                   }
 
                   current=current->next;
+                  zfree(MTYPE_NEXTHOP,current->prev);
+                  current->prev=NULL;
                 }
             }
         }
@@ -817,6 +819,8 @@ zebra_route_send(u_char cmd, struct zclient *zclient, struct prefix *p,
                 }
             }
           current=current->next;
+          zfree(MTYPE_NEXTHOP,current->prev);
+          current->prev=NULL;
         }
     }
 #endif
